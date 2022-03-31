@@ -6,7 +6,7 @@ phases:
   pre_build:
     commands:
       - echo Packaging Application
-      - mvn package -Dquarkus-profile=$ENVIRONMENT
+      - mvn clean package -DskipTests -Dquarkus-profile=$ENVIRONMENT
       - echo Logging in to Docker Hub
       - docker login -u solutionshakan -p $LOGIN_PASSWORD
   build:
