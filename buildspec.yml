@@ -1,0 +1,21 @@
+version: 0.2
+env:
+  secrets-manager:
+    LOGIN_PASSWORD: arn:aws:secretsmanager:us-east-1:703835602150:secret:docker-hub-password-2t8Sqb:DOCKER_PASSWORD
+phases:
+  pre_build:
+    commands:
+      - echo Packaging Application
+      - mvn package -Dquarkus-profile=$ENVIRONMENT
+      - echo Logging in to Docker Hub
+      - docker login -u solutionshakan -p $LOGIN_PASSWORD
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image...     
+      - docker build -f $DOCKER_FILE -t $IMAGE_REPO_NAME:$IMAGE_TAG .    
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker image...
+      - docker push $IMAGE_REPO_NAME:$IMAGE_TAG
