@@ -3,8 +3,7 @@ package com.lectura.backend.service;
 import com.lectura.backend.model.OrderDto;
 import com.lectura.backend.model.SimulateSaleResponse;
 
-import javax.transaction.NotSupportedException;
-import javax.transaction.SystemException;
+import javax.transaction.*;
 import java.net.URI;
 import java.time.LocalDateTime;
 
@@ -15,5 +14,5 @@ public interface IWooCommerceService {
 
     void registerSale(OrderDto order) throws Exception;
 
-    URI getDownloadUrl(Long orderId, String username);
+    URI getDownloadUrl(Long orderId, String uname) throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException;
 }

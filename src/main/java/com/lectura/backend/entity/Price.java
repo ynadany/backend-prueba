@@ -31,6 +31,6 @@ public class Price {
     private Publication publication;
 
     public Integer getIntegerPriceAmount() {
-        return ((Long)Math.round(priceAmount * 100)).intValue();
+        return ((Long) Math.round(priceAmount * 100)).intValue();
     }
 }

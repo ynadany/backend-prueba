@@ -193,9 +193,40 @@ public class WooCommerceService implements IWooCommerceService {
     }
 
     @Override
-    public URI getDownloadUrl(Long orderId, String username) {
+    public URI getDownloadUrl(Long orderId, String uname) throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException {
         var uri = URI.create("https://file-examples.com/storage/feca445c9d624553766291b/2017/10/file-sample_150kB.pdf");
         return uri;
+
+        /*transaction.begin();
+        try {
+            Sale sale = Sale.findById(orderId);
+
+            if (Objects.nonNull(sale) && !sale.getId().isEmpty()) {
+                try {
+                    var response = cantookServiceAPI.getDownloadPublication(sale.getCustomer(), sale.getId(),
+                            sale.getSku(), sale.getFormat(), uname);
+                    if (response.getStatus() == 200) {
+                        uri = URI.create(response.readEntity(String.class));
+                        sale.setDownloaded(true);
+                        sale.persist();
+                        return uri;
+                    } else {
+                        throw new BadRequestException("No se pudo obtener la URL de descarga del producto, por favor comuniquese con la Administración.");
+                    }
+                } catch (Exception ex) {
+                    logger.error("Error on calling Cantook API. " + ex.getMessage(), ex);
+                    throw ex;
+                }
+            } else {
+                throw new NotFoundException("No se pudo encontrar el registro de venta, por favor comuniquese con el administrador.");
+            }
+        } catch (Exception ex) {
+            logger.error("Error on selling a publication  . " + ex.getMessage(), ex);
+            transaction.rollback();
+            throw ex;
+        } finally {
+            transaction.commit();
+        }*/
     }
 
     private void sendProductToWoocommerce(Publication publication) throws Exception {

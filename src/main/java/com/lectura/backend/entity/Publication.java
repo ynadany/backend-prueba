@@ -71,7 +71,7 @@ public class Publication {
                 } else {
                     return list.stream().filter(p ->
                             (p.getRole().equals(Byte.valueOf("15")) && Integer.parseInt(LocalDateTime.now().format(formatter)) <= p.getDate()) ||
-                            p.getRole().equals(Byte.valueOf("15"))).findFirst().get();
+                                    p.getRole().equals(Byte.valueOf("15"))).findFirst().get();
                 }
             }
         } else if (prices.stream().anyMatch(p -> p.getCurrencyCode().equals("USD"))) {
