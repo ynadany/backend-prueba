@@ -202,7 +202,7 @@ public class WooCommerceService implements IWooCommerceService {
 
             if (saleOptional.isPresent() && !saleOptional.get().getId().isEmpty()) {
                 var sale = saleOptional.get();
-                if (sale.getDateTime().plusMinutes(55).isBefore(LocalDateTime.now())) {
+                if (sale.getDateTime().plusMinutes(5).isBefore(LocalDateTime.now())) {
                     throw new BadRequestException("Tiempo expirado de descarga.");
                 }
                 try {
