@@ -12,7 +12,6 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
-@RolesAllowed("Admin")
 @Path("/lectura/api/woocommerce")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -20,12 +19,14 @@ public class WoocommerceResource {
     @Inject
     IWooCommerceService wooCommerceService;
 
+    @RolesAllowed("Admin")
     @POST
     public Response post(SynchronizationRequest request) throws Exception {
         wooCommerceService.synchronization(request.getDateTime());
         return Response.ok().build();
     }
 
+    @RolesAllowed("Admin")
     @GET
     @Path("/simulate-sale/{productId}")
     public Response simulateSale(@PathParam("productId") Long productId, @QueryParam("price") Double price,
@@ -34,6 +35,7 @@ public class WoocommerceResource {
         return Response.ok(response).build();
     }
 
+    @RolesAllowed("Admin")
     @POST
     @Path("/sale/{productId}")
     public Response registerSale(@PathParam("productId") Long productId, OrderDto order) throws Exception {

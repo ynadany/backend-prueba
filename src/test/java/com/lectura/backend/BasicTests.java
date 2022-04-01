@@ -9,6 +9,7 @@ import org.wildfly.common.Assert;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
+import javax.ws.rs.BadRequestException;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -144,5 +145,13 @@ public class BasicTests {
         result = price.getIntegerPriceAmount();
         System.out.println("Integer price: " + result);
         Assert.assertTrue(result == 22599);
+    }
+
+    @Test
+    public void datetimeTest() {
+        var datetime = LocalDateTime.parse("2022-04-01 13:41:31", DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        if (datetime.plusMinutes(5).isBefore(LocalDateTime.now())) {
+            throw new BadRequestException("Tiempo expirado de descarga.");
+        }
     }
 }
