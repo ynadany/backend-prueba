@@ -6,7 +6,8 @@ import com.lectura.backend.service.IWooCommerceService;
 
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
-import javax.transaction.Transactional;
+import javax.transaction.*;
+import javax.transaction.NotSupportedException;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -47,8 +48,9 @@ public class WoocommerceResource {
     @GET
     @Transactional
     @Path("/download/{orderId}")
-    public Response getDownloadUrl(@PathParam("orderId") Long orderId, @QueryParam("username") String username) {
-        var downloadUrl = wooCommerceService.getDownloadUrl(orderId, username);
+    public Response getDownloadUrl(@PathParam("orderId") Long orderId, @QueryParam("uname") String uname) throws HeuristicRollbackException,
+            SystemException, HeuristicMixedException, NotSupportedException, RollbackException {
+        var downloadUrl = wooCommerceService.getDownloadUrl(orderId, uname);
         return Response.temporaryRedirect(downloadUrl).build();
     }
 }

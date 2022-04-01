@@ -1,6 +1,5 @@
 package com.lectura.backend.entity;
 
-import io.quarkus.hibernate.orm.panache.PanacheEntity;
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
 import io.quarkus.panache.common.Parameters;
 import lombok.AllArgsConstructor;

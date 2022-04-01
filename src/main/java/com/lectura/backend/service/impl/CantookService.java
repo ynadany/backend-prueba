@@ -106,7 +106,7 @@ public class CantookService implements ICantookService {
                 logger.warn("Full Synchronization finished: " + ex.getMessage(), ex);
                 break;
             }
-        } while (response.getStatus() == 200 && count < 2 && !finished);
+        } while (response.getStatus() == 200 && count < 5 && !finished);
     }
 
     @Override

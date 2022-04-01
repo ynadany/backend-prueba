@@ -23,6 +23,7 @@ public class Sale extends PanacheEntityBase {
     private String customer;
     private LocalDateTime dateTime;
     private String sku;
+    private String format;
     private Short quantity;
     private String currency;
     private Double price;
