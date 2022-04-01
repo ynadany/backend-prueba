@@ -12,7 +12,7 @@ public interface IWooCommerceService {
 
     SimulateSaleResponse simulateSale(Long productId, Double price) throws Exception;
 
-    void registerSale(OrderDto order) throws Exception;
+    String registerSale(OrderDto order) throws Exception;
 
-    URI getDownloadUrl(Long orderId, String uname) throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException;
+    URI getDownloadUrl(String orderId, String uname) throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException;
 }

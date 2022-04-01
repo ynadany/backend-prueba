@@ -21,11 +21,9 @@ import javax.ws.rs.BadRequestException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
 import java.net.URI;
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -36,30 +34,30 @@ public class WooCommerceService implements IWooCommerceService {
     private static final Logger logger = Logger.getLogger(WooCommerceService.class);
 
     @ConfigProperty(name = "libranda.exchange-rate", defaultValue = "6.96")
-    private static Double exchangeRate;
+    static Double exchangeRate;
 
     @ConfigProperty(name = "libranda.sale-state", defaultValue = "test")
     String saleState;
 
     @Inject
     @RestClient
-    private WooCommerceAPI wooCommerceAPI;
+    WooCommerceAPI wooCommerceAPI;
 
     @Inject
     @RestClient
-    private CantookServiceAPI cantookServiceAPI;
+    CantookServiceAPI cantookServiceAPI;
 
     @Inject
-    private PublicationRepository repository;
+    PublicationRepository repository;
 
     @Inject
-    private PublisherRepository publisherRepository;
+    PublisherRepository publisherRepository;
 
     @Inject
     UserTransaction transaction;
 
     @Inject
-    private ICantookService cantookService;
+    ICantookService cantookService;
 
     @Override
     public void synchronization(LocalDateTime dateTime) throws Exception {
@@ -141,7 +139,7 @@ public class WooCommerceService implements IWooCommerceService {
     }
 
     @Override
-    public void registerSale(OrderDto order) throws Exception {
+    public String registerSale(OrderDto order) throws Exception {
         transaction.begin();
         try {
             var publication = repository.findByProductId(order.getProductId());
@@ -162,17 +160,21 @@ public class WooCommerceService implements IWooCommerceService {
 
                     var response = cantookServiceAPI.salePublication(publication.getIsbn(), request);
                     if (response.getStatus() == 201) {
+                        var token = getUniqueToken();
                         var sale = new Sale();
                         sale.setCustomer(order.getUsername());
                         sale.setDateTime(LocalDateTime.now());
+                        sale.setFormat(request.getFormat());
                         sale.setId(order.getOrderId());
                         sale.setPrice(publicationPrice.getPriceAmount());
                         sale.setSku(publication.getIsbn());
                         sale.setQuantity((short) 1);
                         sale.setCurrency(publicationPrice.getCurrencyCode());
                         sale.setDownloaded(false);
+                        sale.setToken(token);
 
                         sale.persist();
+                        return token;
                     } else {
                         throw new BadRequestException("No se puede registrar la venta por favor comuniquese con la Administración.");
                     }
@@ -193,40 +195,44 @@ public class WooCommerceService implements IWooCommerceService {
     }
 
     @Override
-    public URI getDownloadUrl(Long orderId, String uname) throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException {
-        var uri = URI.create("https://file-examples.com/storage/feca445c9d624553766291b/2017/10/file-sample_150kB.pdf");
-        return uri;
-
-        /*transaction.begin();
+    public URI getDownloadUrl(String token, String uname) throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException {
+        transaction.begin();
         try {
-            Sale sale = Sale.findById(orderId);
+            var saleOptional = Sale.findByToken(token);
 
-            if (Objects.nonNull(sale) && !sale.getId().isEmpty()) {
+            if (saleOptional.isPresent() && !saleOptional.get().getId().isEmpty()) {
+                var sale = saleOptional.get();
+                if (sale.getDateTime().plusMinutes(5).isAfter(LocalDateTime.now())) {
+                    throw new BadRequestException("Tiempo expirado de descarga.");
+                }
                 try {
                     var response = cantookServiceAPI.getDownloadPublication(sale.getCustomer(), sale.getId(),
                             sale.getSku(), sale.getFormat(), uname);
                     if (response.getStatus() == 200) {
-                        uri = URI.create(response.readEntity(String.class));
+                        var uri = URI.create(response.readEntity(String.class));
                         sale.setDownloaded(true);
                         sale.persist();
                         return uri;
                     } else {
-                        throw new BadRequestException("No se pudo obtener la URL de descarga del producto, por favor comuniquese con la Administración.");
+                        throw new BadRequestException("No se pudo obtener la URL de descarga del producto, por favor comuniquese con el Administrador.");
                     }
                 } catch (Exception ex) {
                     logger.error("Error on calling Cantook API. " + ex.getMessage(), ex);
                     throw ex;
                 }
             } else {
-                throw new NotFoundException("No se pudo encontrar el registro de venta, por favor comuniquese con el administrador.");
+                throw new NotFoundException("No se pudo encontrar el registro de venta activo, por favor comuniquese con el Administrador.");
             }
         } catch (Exception ex) {
             logger.error("Error on selling a publication  . " + ex.getMessage(), ex);
             transaction.rollback();
             throw ex;
         } finally {
-            transaction.commit();
-        }*/
+            logger.info("Transaction: " + transaction.getStatus());
+            if (transaction.getStatus() != 6) {
+                transaction.commit();
+            }
+        }
     }
 
     private void sendProductToWoocommerce(Publication publication) throws Exception {
@@ -350,5 +356,12 @@ public class WooCommerceService implements IWooCommerceService {
             logger.error("Error on synchronization of Categories.", ex);
             throw ex;
         }
+    }
+
+    private String getUniqueToken() {
+        StringBuilder token = new StringBuilder();
+        long currentTimeInMilisecond = Instant.now().toEpochMilli();
+        return token.append(currentTimeInMilisecond).append("-")
+                .append(UUID.randomUUID()).toString();
     }
 }
