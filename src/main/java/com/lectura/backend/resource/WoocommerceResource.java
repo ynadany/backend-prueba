@@ -18,7 +18,7 @@ import javax.ws.rs.core.Response;
 @Consumes(MediaType.APPLICATION_JSON)
 public class WoocommerceResource {
     @Inject
-    private IWooCommerceService wooCommerceService;
+    IWooCommerceService wooCommerceService;
 
     @POST
     public Response post(SynchronizationRequest request) throws Exception {
@@ -35,22 +35,20 @@ public class WoocommerceResource {
     }
 
     @POST
-    @Transactional
     @Path("/sale/{productId}")
     public Response registerSale(@PathParam("productId") Long productId, OrderDto order) throws Exception {
-        if (productId.equals(order.getProductId())) {
+        if (!productId.equals(order.getProductId())) {
             throw new BadRequestException("ProductID should be the same in the body");
         }
-        wooCommerceService.registerSale(order);
-        return Response.status(Response.Status.CREATED).build();
+        return Response.status(Response.Status.CREATED)
+                .entity(wooCommerceService.registerSale(order)).build();
     }
 
     @GET
-    @Transactional
-    @Path("/download/{orderId}")
-    public Response getDownloadUrl(@PathParam("orderId") Long orderId, @QueryParam("uname") String uname) throws HeuristicRollbackException,
+    @Path("/download/{token}")
+    public Response getDownloadUrl(@PathParam("token") String token, @QueryParam("uname") String uname) throws HeuristicRollbackException,
             SystemException, HeuristicMixedException, NotSupportedException, RollbackException {
-        var downloadUrl = wooCommerceService.getDownloadUrl(orderId, uname);
+        var downloadUrl = wooCommerceService.getDownloadUrl(token, uname);
         return Response.temporaryRedirect(downloadUrl).build();
     }
 }

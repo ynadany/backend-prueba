@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
 @Consumes(MediaType.APPLICATION_JSON)
 public class PublicationResource {
     @Inject
-    private ICantookService cantookService;
+    ICantookService cantookService;
 
     @POST
     @Path("full")

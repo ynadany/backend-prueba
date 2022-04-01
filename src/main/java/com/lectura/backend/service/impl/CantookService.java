@@ -64,16 +64,16 @@ public class CantookService implements ICantookService {
 
     @Inject
     @RestClient
-    private CantookServiceAPI cantookServiceAPI;
+    CantookServiceAPI cantookServiceAPI;
 
     @Inject
-    private PublicationRepository repository;
+    PublicationRepository repository;
 
     @Inject
-    private PriceRepository priceRepository;
+    PriceRepository priceRepository;
 
     @Inject
-    private PublisherRepository publisherRepository;
+    PublisherRepository publisherRepository;
 
     @Override
     public void fullSynchronization() throws Exception {

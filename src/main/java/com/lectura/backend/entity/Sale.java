@@ -1,6 +1,7 @@
 package com.lectura.backend.entity;
 
 import io.quarkus.hibernate.orm.panache.PanacheEntityBase;
+import io.quarkus.panache.common.Parameters;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -10,6 +11,7 @@ import javax.persistence.Entity;
 import javax.persistence.Id;
 import javax.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.Optional;
 
 @Getter
 @Setter
@@ -27,5 +29,12 @@ public class Sale extends PanacheEntityBase {
     private Short quantity;
     private String currency;
     private Double price;
+
+    private String token;
     private boolean downloaded;
+
+    public static Optional<Sale> findByToken(String token) {
+        return find("downloaded = false AND token = :token",
+                Parameters.with("token", token)).singleResultOptional();
+    }
 }
