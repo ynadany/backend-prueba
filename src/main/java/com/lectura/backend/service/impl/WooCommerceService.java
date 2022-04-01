@@ -298,6 +298,7 @@ public class WooCommerceService implements IWooCommerceService {
             synchronizeTags();
             var publications = repository.findToSynchronize();
             var bicCodes = publications.stream()
+                    .filter(p -> Objects.nonNull(p.getSubjectBicCode()))
                     .map(p -> asList(StringUtils.split(p.getSubjectBicCode(), "|")))
                     .flatMap(Collection::stream)
                     .distinct()
@@ -313,6 +314,9 @@ public class WooCommerceService implements IWooCommerceService {
     }
 
     private List<ItemDto> getCategories(String subjectsBIC) {
+        if (Objects.isNull(subjectsBIC) && subjectsBIC.length() > 0) {
+            return new ArrayList<>();
+        }
         return Arrays.stream(StringUtils.split(subjectsBIC, "|"))
                 .map(s -> ((Category) Category.findById(s)).getCategoryId()).distinct()
                 .map(c -> ItemDto.builder().id(c).build())
