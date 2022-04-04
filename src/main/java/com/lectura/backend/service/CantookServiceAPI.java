@@ -7,7 +7,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Response;
 
-@RegisterRestClient(baseUri = "https://cantook.libranda.com/api/organisations/libreriaslectura")
+@RegisterRestClient(configKey = "cantook-api")
 @ClientHeaderParam(name = "Authorization", value = "Basic bGlibGVjdHVyYTpYI3lJelYhbF4kIXE=")
 public interface CantookServiceAPI {
 
