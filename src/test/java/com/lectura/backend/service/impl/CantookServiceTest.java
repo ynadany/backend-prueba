@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-//@QuarkusTest
+@QuarkusTest
 public class CantookServiceTest {
 
     @Inject
@@ -32,13 +32,11 @@ public class CantookServiceTest {
     PublicationRepository repository;
 
     @Test
-    @Transactional
-    public void fullSynchronization() throws Exception {
-        cantookService.fullSynchronization();
+    public void fullSynchronization() {
+        var result = cantookService.fullSynchronization();
     }
 
     @Test
-    @Transactional
     public void deltaSynchronization() throws Exception {
         cantookService.deltaSynchronization(LocalDateTime.now().minusMinutes(60));
     }

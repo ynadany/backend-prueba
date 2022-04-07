@@ -20,25 +20,25 @@ public interface WooCommerceAPI {
     List<ProductDto> getProducts();
 
     @POST
-    @Retry(maxRetries = 3, maxDuration = 3)
+    @Retry(maxRetries = 3, maxDuration = 10)
     @Consumes(MediaType.APPLICATION_JSON)
     @Path("/products")
     ProductDto postProduct(CreateProductRequest request);
 
     @PUT
-    @Retry(maxRetries = 3, maxDuration = 3)
+    @Retry(maxRetries = 3, maxDuration = 10)
     @Consumes(MediaType.APPLICATION_JSON)
     @Path("/products/{id}")
     ProductDto putProduct(@PathParam("id") Long id, UpdateProductRequest request);
 
     @POST
-    @Retry(maxRetries = 3, maxDuration = 3)
+    @Retry(maxRetries = 3, maxDuration = 10)
     @Consumes(MediaType.APPLICATION_JSON)
     @Path("/products/tags")
     ItemDto postTag(ItemDto request);
 
     @POST
-    @Retry(maxRetries = 3, maxDuration = 3)
+    @Retry(maxRetries = 3, maxDuration = 10)
     @Consumes(MediaType.APPLICATION_JSON)
     @Path("/products/categories")
     ItemDto postCategories(ItemDto request);

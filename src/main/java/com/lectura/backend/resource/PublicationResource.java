@@ -2,14 +2,16 @@ package com.lectura.backend.resource;
 
 import com.lectura.backend.model.SynchronizationRequest;
 import com.lectura.backend.service.ICantookService;
+import org.eclipse.microprofile.faulttolerance.Fallback;
 
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
-import javax.transaction.Transactional;
-import javax.ws.rs.*;
+import javax.ws.rs.Consumes;
+import javax.ws.rs.POST;
+import javax.ws.rs.Path;
+import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.time.LocalDateTime;
 
 @RolesAllowed("Admin")
 @Path("/lectura/api/publications")
@@ -20,18 +22,32 @@ public class PublicationResource {
     ICantookService cantookService;
 
     @POST
+    @Fallback(fallbackMethod = "fallbackResponse")
     @Path("full")
-    @Transactional
     public Response post() throws Exception {
-        cantookService.fullSynchronization();
-        return Response.ok().build();
+        var result = cantookService.fullSynchronization();
+        if (result) {
+            return Response.ok("The operation is processing another task ...").build();
+        }
+        return Response.ok("Processed").build();
     }
 
     @POST
+    @Fallback(fallbackMethod = "fallbackResponse")
     @Path("delta")
-    @Transactional
     public Response post(SynchronizationRequest request) throws Exception {
-        cantookService.deltaSynchronization(request.getDateTime());
-        return Response.ok().build();
+        var result = cantookService.deltaSynchronization(request.getDateTime());
+        if (result) {
+            return Response.ok("The operation is processing another task ...").build();
+        }
+        return Response.ok("Processed").build();
+    }
+
+    public Response fallbackResponse(SynchronizationRequest request) {
+        return fallbackResponse();
+    }
+
+    public Response fallbackResponse() {
+        return Response.accepted().entity("The operation is processing in background ...").build();
     }
 }

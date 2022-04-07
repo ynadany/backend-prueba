@@ -78,6 +78,7 @@ public class WooCommerceService implements IWooCommerceService {
 
             AtomicInteger migrated = new AtomicInteger(0);
             Multi.createFrom().emitter(e -> emitMulti(e))
+                    .onFailure().recoverWithCompletion()
                     .subscribe().with((p) -> {
                                 logger.info(p.toString());
                                 try {
@@ -242,8 +243,25 @@ public class WooCommerceService implements IWooCommerceService {
         }
     }
 
+    @Transactional
+    public void synchronizeParameters() {
+        try {
+            synchronizeTags();
+            var publications = repository.findToSynchronize();
+            var bicCodes = publications.stream()
+                    .filter(p -> Objects.nonNull(p.getSubjectBicCode()))
+                    .map(p -> asList(StringUtils.split(p.getSubjectBicCode(), "|")))
+                    .flatMap(Collection::stream).distinct()
+                    .collect(Collectors.toList());
+            synchronizeCategories(bicCodes);
+        } catch (Exception ex) {
+            logger.error(ex.getMessage(), ex);
+            throw ex;
+        }
+    }
+
     private void emitMulti(MultiEmitter<? super Publication> emitter) {
-        var publications = repository.findToSynchronize(0, 1000);
+        var publications = repository.findToSynchronize(0, 10000);
         logger.info("Publications: " + publications.size());
         for (var publication : publications) {
             emitter.emit(publication);
@@ -292,23 +310,6 @@ public class WooCommerceService implements IWooCommerceService {
             repository.persistAndFlush(publication);
         } else {
             logger.warn("The publication " + publication.getId() + " was not synchronized. " + publication);
-        }
-    }
-
-    @Transactional
-    public void synchronizeParameters() {
-        try {
-            synchronizeTags();
-            var publications = repository.findToSynchronize();
-            var bicCodes = publications.stream()
-                    .filter(p -> Objects.nonNull(p.getSubjectBicCode()))
-                    .map(p -> asList(StringUtils.split(p.getSubjectBicCode(), "|")))
-                    .flatMap(Collection::stream).distinct()
-                    .collect(Collectors.toList());
-            synchronizeCategories(bicCodes);
-        } catch (Exception ex) {
-            logger.error(ex.getMessage(), ex);
-            throw ex;
         }
     }
 
