@@ -1,9 +1,11 @@
 package com.lectura.backend.service.impl;
 
 import com.lectura.backend.entity.Category;
+import com.lectura.backend.entity.Publication;
 import com.lectura.backend.model.CreateProductRequest;
 import com.lectura.backend.model.ImageDto;
 import com.lectura.backend.model.ItemDto;
+import com.lectura.backend.repository.PublicationRepository;
 import com.lectura.backend.service.IWooCommerceService;
 import com.lectura.backend.service.WooCommerceAPI;
 import io.quarkus.test.junit.QuarkusTest;
@@ -15,10 +17,11 @@ import org.wildfly.common.Assert;
 import javax.inject.Inject;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-@QuarkusTest
+//@QuarkusTest
 public class WooCommerceServiceTest {
     @Inject
     IWooCommerceService wooCommerceService;
@@ -29,7 +32,7 @@ public class WooCommerceServiceTest {
 
     @Test
     public void synchronization() throws Exception {
-        wooCommerceService.synchronization(LocalDateTime.now());
+        wooCommerceService.synchronization();
     }
 
     @Test
@@ -45,7 +48,7 @@ public class WooCommerceServiceTest {
         product.setImages(Arrays.asList(new ImageDto(null, "https://assets-libr.cantook.net/medias/23/b0e4e6854b6237f0c086c5b7ecaa6193e77a60.jpg?h=-&w=200")));
 
         try {
-            var response = wooCommerceAPI.postProduct(product);
+            //var response = wooCommerceAPI.postProduct(product);
         } catch (Exception e) {
             e.printStackTrace();
         }

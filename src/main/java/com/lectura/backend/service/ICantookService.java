@@ -16,9 +16,9 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public interface ICantookService {
-    void fullSynchronization() throws Exception;
+    boolean fullSynchronization();
 
-    void deltaSynchronization(LocalDateTime dateTime) throws Exception;
+    boolean deltaSynchronization(LocalDateTime dateTime) throws Exception;
 
     void synchronize(String isbn) throws Exception;
 

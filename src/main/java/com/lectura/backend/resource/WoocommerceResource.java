@@ -1,17 +1,19 @@
 package com.lectura.backend.resource;
 
 import com.lectura.backend.model.OrderDto;
-import com.lectura.backend.model.SynchronizationRequest;
 import com.lectura.backend.service.IWooCommerceService;
+import org.eclipse.microprofile.faulttolerance.Fallback;
 
+import javax.annotation.security.PermitAll;
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
-import javax.transaction.*;
 import javax.transaction.NotSupportedException;
+import javax.transaction.*;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
+@RolesAllowed("Admin")
 @Path("/lectura/api/woocommerce")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -19,14 +21,16 @@ public class WoocommerceResource {
     @Inject
     IWooCommerceService wooCommerceService;
 
-    @RolesAllowed("Admin")
+    @Fallback(fallbackMethod = "fallbackResponse")
     @POST
-    public Response post(SynchronizationRequest request) throws Exception {
-        wooCommerceService.synchronization(request.getDateTime());
-        return Response.ok().build();
+    public Response post() throws Exception {
+        var result = wooCommerceService.synchronization();
+        if (result) {
+            return Response.ok("The operation is processing another task ...").build();
+        }
+        return Response.ok("Processed").build();
     }
 
-    @RolesAllowed("Admin")
     @GET
     @Path("/simulate-sale/{productId}")
     public Response simulateSale(@PathParam("productId") Long productId, @QueryParam("price") Double price,
@@ -35,7 +39,6 @@ public class WoocommerceResource {
         return Response.ok(response).build();
     }
 
-    @RolesAllowed("Admin")
     @POST
     @Path("/sale/{productId}")
     public Response registerSale(@PathParam("productId") Long productId, OrderDto order) throws Exception {
@@ -46,11 +49,16 @@ public class WoocommerceResource {
                 .entity(wooCommerceService.registerSale(order)).build();
     }
 
+    @PermitAll
     @GET
     @Path("/download/{token}")
     public Response getDownloadUrl(@PathParam("token") String token, @QueryParam("uname") String uname) throws HeuristicRollbackException,
             SystemException, HeuristicMixedException, NotSupportedException, RollbackException {
         var downloadUrl = wooCommerceService.getDownloadUrl(token, uname);
         return Response.temporaryRedirect(downloadUrl).build();
+    }
+
+    public Response fallbackResponse() {
+        return Response.accepted().entity("The operation is processing in background ...").build();
     }
 }

@@ -14,7 +14,7 @@ import java.io.StringReader;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
-@QuarkusTest
+//@QuarkusTest
 public class CantookServiceAPITest {
 
     @Inject
@@ -48,7 +48,7 @@ public class CantookServiceAPITest {
 
     @Test
     public void getPublicationTest() {
-        //var result = myRemoteService.getPublication("9789500745772");
+        var result = myRemoteService.getPublication("9789500745772");
     }
 
     //@Test

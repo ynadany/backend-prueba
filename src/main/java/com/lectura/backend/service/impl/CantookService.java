@@ -1,7 +1,8 @@
 package com.lectura.backend.service.impl;
 
+import com.lectura.backend.entity.Migration;
 import com.lectura.backend.entity.Publication;
-import com.lectura.backend.entity.Publisher;
+import com.lectura.backend.entity.SynchronizationEnum;
 import com.lectura.backend.model.CreateSalesRequest;
 import com.lectura.backend.repository.PriceRepository;
 import com.lectura.backend.repository.PublicationRepository;
@@ -11,6 +12,9 @@ import com.lectura.backend.service.ICantookService;
 import com.lectura.backend.service.PriceHandler;
 import com.lectura.backend.service.PublicationHandler;
 import com.lectura.backend.util.XmlUtils;
+import io.quarkus.narayana.jta.runtime.TransactionConfiguration;
+import io.smallrye.mutiny.Multi;
+import io.smallrye.mutiny.subscription.MultiEmitter;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 import org.w3c.dom.Node;
@@ -19,6 +23,9 @@ import org.xml.sax.SAXException;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
+import javax.transaction.Transactional;
+import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.Link;
 import javax.ws.rs.core.Response;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.*;
@@ -39,18 +46,22 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class CantookService implements ICantookService {
     private static final Logger logger = Logger.getLogger(CantookService.class);
+    private static boolean isProcessing = false;
+    private static LocalDateTime deltaDateTime = null;
 
     private static final String xpathProducts = "/ONIXMessage//Product[PublishingDetail/PublishingStatus/text()='04' " +
             "and contains(PublishingDetail/SalesRights/Territory/CountriesIncluded/text(),'BO') " +
             "and contains(ProductSupply/Market/Territory/CountriesIncluded/text(), 'BO')]";
     private static final String xpathPrices = "ProductSupply/SupplyDetail//Price[Territory/CountriesIncluded/text()='BO']";
     private static final List<String> languages = List.of("spa", "eng");
+    private static final int PAGES_TO_PROCESS = 70;
 
     private static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss");
 
@@ -59,8 +70,6 @@ public class CantookService implements ICantookService {
     private static PublicationHandler publicationHandler = new PublicationHandler();
     private static PriceHandler priceHandler = new PriceHandler();
     private static SAXParser saxParser;
-
-    private List<Publisher> publishers;
 
     @Inject
     @RestClient
@@ -76,75 +85,73 @@ public class CantookService implements ICantookService {
     PublisherRepository publisherRepository;
 
     @Override
-    public void fullSynchronization() throws Exception {
-        Response response = cantookServiceAPI.getFullPublications(null);
-        var iStreamXml = response.readEntity(InputStream.class);
+    public boolean fullSynchronization() {
+        if (isProcessing) return true;
 
-        var publications = getPublications(iStreamXml, true);
-        updatePublishers(publications);
-        repository.persist(publications);
-
-        int count = 0;
-        String startValue;
-        boolean finished = false;
-        do {
-            try {
-                var link = response.getLink("next");
-                logger.info("Link >> Query String: " + link.getUri().getRawQuery());
-                startValue = getQueryParam(link.getUri().getRawQuery(), "start");
-                response = cantookServiceAPI.getFullPublications(startValue);
-                if (response.getStatus() == 200) {
-                    iStreamXml = response.readEntity(InputStream.class);
-                    publications = getPublications(iStreamXml, true);
-                    updatePublishers(publications);
-                    repository.persist(publications);
-                    count++;
-                } else {
-                    finished = true;
-                }
-            } catch (Exception ex) {
-                logger.warn("Full Synchronization finished: " + ex.getMessage(), ex);
-                break;
+        try {
+            int i = 0;
+            boolean check = true;
+            while (check) {
+                logger.info("Process Full Synchro > Chunk: " + i++);
+                check = processFullSync();
             }
-        } while (response.getStatus() == 200 && count < 5 && !finished);
+        } finally {
+            isProcessing = false;
+        }
+        return false;
+    }
+
+    @Transactional
+    @TransactionConfiguration(timeout = 1000) // 15min
+    public boolean processFullSync() {
+        isProcessing = true;
+        AtomicInteger migrated = new AtomicInteger(0);
+        Multi.createFrom().emitter(e -> emitMultiFull(e))
+                .onFailure().recoverWithCompletion()
+                .subscribe().with((p) -> {
+                            updatePublishers((List<Publication>) p);
+                            repository.persist((List<Publication>) p);
+                            logger.info("Publications migrated: " + ((List<?>) p).size());
+                            migrated.incrementAndGet();
+                        }, ex -> logger.error(ex.getMessage(), ex),
+                        () -> logger.info("Completed pages: " + migrated.get()));
+        return isProcessing;
     }
 
     @Override
-    public void deltaSynchronization(LocalDateTime dateTime) throws Exception {
-        var formattedDateTime = dateTime.format(formatter);
-        logger.info("Delta init datetime: " + formattedDateTime);
+    public boolean deltaSynchronization(LocalDateTime dateTime) throws Exception {
+        if (isProcessing) return true;
 
-        Response response = cantookServiceAPI.getDeltaPublications(formattedDateTime, null, null);
-        var iStreamXml = response.readEntity(InputStream.class);
-
-        var publications = getPublications(iStreamXml, false);
-        updatePublications(publications);
-
-        String startValue;
-        String fromValue;
-        String toValue;
-        boolean finished = false;
-        do {
-            var link = response.getLink("next");
-            logger.info("Link >> Query String: " + link.getUri().getRawQuery());
-            startValue = getQueryParam(link.getUri().getRawQuery(), "start");
-            fromValue = getQueryParam(link.getUri().getRawQuery(), "from");
-            toValue = getQueryParam(link.getUri().getRawQuery(), "to");
-            try {
-                response = cantookServiceAPI.getDeltaPublications(fromValue, startValue, toValue);
-                if (response.getStatus() == 200) {
-                    iStreamXml = response.readEntity(InputStream.class);
-                    publications = getPublications(iStreamXml, false);
-                    updatePublishers(publications);
-                    updatePublications(publications);
-                } else {
-                    finished = true;
-                }
-            } catch (Exception ex) {
-                logger.warn("Delta Synchronization finished: " + ex.getMessage(), ex);
-                break;
+        deltaDateTime = dateTime;
+        try {
+            int i = 0;
+            boolean check = true;
+            while (check) {
+                logger.info("Process Delta Synchro > Chunk: " + i++);
+                check = processDeltaSync();
             }
-        } while (response.getStatus() == 200 && !finished);
+        } finally {
+            deltaDateTime = null;
+            isProcessing = false;
+        }
+        return false;
+    }
+
+    @Transactional
+    @TransactionConfiguration(timeout = 1000) // 15min
+    public boolean processDeltaSync() {
+        isProcessing = true;
+        AtomicInteger migrated = new AtomicInteger(0);
+        Multi.createFrom().emitter(e -> emitMultiDelta(e))
+                .onFailure().recoverWithCompletion()
+                .subscribe().with((p) -> {
+                            updatePublishers((List<Publication>) p);
+                            updatePublications((List<Publication>) p);
+                            logger.info("Publications migrated: " + ((List<?>) p).size());
+                            migrated.incrementAndGet();
+                        }, ex -> logger.error(ex.getMessage(), ex),
+                        () -> logger.info("Completed pages: " + migrated.get()));
+        return isProcessing;
     }
 
     @Override
@@ -161,22 +168,158 @@ public class CantookService implements ICantookService {
         return false;
     }
 
+    private void emitMultiFull(MultiEmitter<? super List<Publication>> emitter) {
+        try {
+            var migration = Migration.builder()
+                    .dateTime(LocalDateTime.now())
+                    .type(SynchronizationEnum.FULL)
+                    .finished(false).build();
+
+            int countPublications = 0;
+            int countPages = 0;
+            InputStream iStreamXml;
+            Response response = null;
+            List<Publication> publications;
+            String startValue = null;
+            Link link;
+            var lastMigration = Migration.findLast(SynchronizationEnum.FULL);
+            if (Objects.nonNull(lastMigration) && lastMigration.getId() > 0) {
+                logger.info("Next Link >> Resume Link: " + lastMigration.getLastUrl());
+                link = Link.valueOf(lastMigration.getLastUrl());
+                startValue = getQueryParam(link.getUri().getRawQuery(), "start");
+                lastMigration.setFinished(true);
+            }
+            do {
+                try {
+                    response = cantookServiceAPI.getFullPublications(startValue);
+                    if (response.getStatus() == 200) {
+                        if (Objects.nonNull(lastMigration) && !lastMigration.isPersistent()) {
+                            lastMigration.persistAndFlush();
+                        }
+                        iStreamXml = response.readEntity(InputStream.class);
+                        publications = getPublications(iStreamXml, true);
+                        countPublications = countPublications + publications.size();
+                        countPages = countPages + 1;
+                        emitter.emit(publications);
+                        link = response.getLink("next");
+                        migration.setDateTime(LocalDateTime.now());
+                        migration.setLastUrl(link.toString());
+                        migration.setCount(countPublications);
+                        migration.persistAndFlush();
+                        logger.info("Next Link >> Query String: " + link.getUri().getRawQuery());
+                        startValue = getQueryParam(link.getUri().getRawQuery(), "start");
+                    }
+                } catch (WebApplicationException ex) {
+                    if (ex.getResponse().getStatus() == 404) {
+                        logger.warn("Full Synchro Emitter finished: " + ex.getMessage());
+                        migration.setFinished(true);
+                        migration.persistAndFlush();
+                        isProcessing = false;
+                    } else {
+                        throw ex;
+                    }
+                } catch (Exception ex) {
+                    logger.warn("Full Synchro Emitter unexpected error: " + ex.getMessage(), ex);
+                    throw ex;
+                }
+            } while (isProcessing && countPages < PAGES_TO_PROCESS);
+            emitter.complete();
+        } catch (Exception ex) {
+            logger.error("Full Synchro Emitter Error, " + ex.getMessage(), ex);
+            isProcessing = false;
+            emitter.fail(ex);
+        }
+    }
+
+    private void emitMultiDelta(MultiEmitter<? super List<Publication>> emitter) {
+        try {
+            var formattedDateTime = deltaDateTime.format(formatter);
+            logger.info("Delta DateTime: " + formattedDateTime);
+
+            var migration = Migration.builder()
+                    .dateTime(LocalDateTime.now())
+                    .type(SynchronizationEnum.DELTA)
+                    .finished(false).build();
+
+            int countPublications = 0;
+            int countPages = 0;
+            InputStream iStreamXml;
+            Response response = null;
+            List<Publication> publications;
+            String startValue = null;
+            String fromValue = formattedDateTime;
+            String toValue = null;
+            Link link;
+            var lastMigration = Migration.findLast(SynchronizationEnum.DELTA);
+            if (Objects.nonNull(lastMigration) && lastMigration.getId() > 0) {
+                logger.info("Next Link >> Resume Link: " + lastMigration.getLastUrl());
+                link = Link.valueOf(lastMigration.getLastUrl());
+                startValue = getQueryParam(link.getUri().getRawQuery(), "start");
+                fromValue = getQueryParam(link.getUri().getRawQuery(), "from");
+                toValue = getQueryParam(link.getUri().getRawQuery(), "to");
+                lastMigration.setFinished(true);
+            }
+            do {
+                try {
+                    response = cantookServiceAPI.getDeltaPublications(fromValue, startValue, toValue);
+                    if (response.getStatus() == 200) {
+                        if (Objects.nonNull(lastMigration) && !lastMigration.isPersistent()) {
+                            lastMigration.persistAndFlush();
+                        }
+                        iStreamXml = response.readEntity(InputStream.class);
+                        publications = getPublications(iStreamXml, true);
+                        countPublications = countPublications + publications.size();
+                        countPages = countPages + 1;
+                        emitter.emit(publications);
+
+                        link = response.getLink("next");
+                        migration.setDateTime(LocalDateTime.now());
+                        migration.setLastUrl(link.toString());
+                        migration.setCount(countPublications);
+                        migration.persistAndFlush();
+                        logger.info("Next Link >> Query String: " + link.getUri().getRawQuery());
+                        startValue = getQueryParam(link.getUri().getRawQuery(), "start");
+                        fromValue = getQueryParam(link.getUri().getRawQuery(), "from");
+                        toValue = getQueryParam(link.getUri().getRawQuery(), "to");
+                    }
+                } catch (WebApplicationException ex) {
+                    if (ex.getResponse().getStatus() == 404) {
+                        logger.warn("Delta Synchro Emitter finished: " + ex.getMessage());
+                        migration.setFinished(true);
+                        migration.persistAndFlush();
+                        isProcessing = false;
+                    } else {
+                        throw ex;
+                    }
+                } catch (Exception ex) {
+                    logger.warn("Delta Synchro Emitter unexpected error: " + ex.getMessage(), ex);
+                    throw ex;
+                }
+            } while (isProcessing && countPages < PAGES_TO_PROCESS);
+            emitter.complete();
+        } catch (Exception ex) {
+            logger.error("Delta Synchro Emitter Error, " + ex.getMessage(), ex);
+            isProcessing = false;
+            emitter.fail(ex);
+        }
+    }
+
     public void updatePublications(List<Publication> listPublications) {
         logger.debug("Total publications: " + listPublications.size());
         updatePublishers(listPublications);
         var noActivePublications = listPublications.stream()
                 .filter(p -> (!"04".equals(p.getPublishingStatus()) || !"04".equals(p.getMarketPublishingStatus())))
-                        .map(p -> {
-                            Publication pub = repository.findById(p.getId());
-                            if (Objects.nonNull(pub)) {
-                                pub.setPublishingStatus(p.getPublishingStatus());
-                                pub.setMarketPublishingStatus(p.getMarketPublishingStatus());
-                                pub.setUpdated(false);
-                                return pub;
-                            } else {
-                                return (Publication) null;
-                            }
-                        })
+                .map(p -> {
+                    Publication pub = repository.findById(p.getId());
+                    if (Objects.nonNull(pub)) {
+                        pub.setPublishingStatus(p.getPublishingStatus());
+                        pub.setMarketPublishingStatus(p.getMarketPublishingStatus());
+                        pub.setUpdated(false);
+                        return pub;
+                    } else {
+                        return (Publication) null;
+                    }
+                })
                 .filter(p -> Objects.nonNull(p))
                 .collect(Collectors.toList());
         logger.info("Total No Active publications: " + noActivePublications.size());
@@ -237,7 +380,7 @@ public class CantookService implements ICantookService {
 
     private void updatePublishers(List<Publication> publications) {
         var publishers = publications.stream().map(p -> p.getPublisher()).distinct()
-                .map(p-> {
+                .map(p -> {
                     var db = publisherRepository.findById(p.getId());
                     return Objects.isNull(db) ? p : db;
                 }).collect(Collectors.toList());
@@ -259,7 +402,6 @@ public class CantookService implements ICantookService {
 
             getSaxParser().parse(is, publicationHandler);
             var publication = publicationHandler.getPublication();
-
 
 
             publication.setPrices(new ArrayList<>());

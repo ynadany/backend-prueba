@@ -1,6 +1,9 @@
 package com.lectura.backend.service.impl;
 
-import com.lectura.backend.entity.*;
+import com.lectura.backend.entity.Category;
+import com.lectura.backend.entity.Price;
+import com.lectura.backend.entity.Publication;
+import com.lectura.backend.entity.Sale;
 import com.lectura.backend.model.*;
 import com.lectura.backend.repository.PublicationRepository;
 import com.lectura.backend.repository.PublisherRepository;
@@ -9,6 +12,9 @@ import com.lectura.backend.service.ICantookService;
 import com.lectura.backend.service.IWooCommerceService;
 import com.lectura.backend.service.WooCommerceAPI;
 import com.lectura.backend.util.Descriptions;
+import io.quarkus.narayana.jta.runtime.TransactionConfiguration;
+import io.smallrye.mutiny.Multi;
+import io.smallrye.mutiny.subscription.MultiEmitter;
 import org.apache.commons.lang3.StringUtils;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
@@ -33,8 +39,10 @@ import static java.util.Arrays.asList;
 public class WooCommerceService implements IWooCommerceService {
     private static final Logger logger = Logger.getLogger(WooCommerceService.class);
 
+    private static boolean isProcessing = false;
+
     @ConfigProperty(name = "libranda.exchange-rate", defaultValue = "6.96")
-    static Double exchangeRate;
+    Double exchangeRate;
 
     @ConfigProperty(name = "libranda.sale-state", defaultValue = "test")
     String saleState;
@@ -60,32 +68,31 @@ public class WooCommerceService implements IWooCommerceService {
     ICantookService cantookService;
 
     @Override
-    public void synchronization(LocalDateTime dateTime) throws Exception {
-        if (!synchronizeParameters()) {
-            throw new Exception("Error ocurring in Synchronization of parameters.");
-        }
-
-        transaction.begin();
-        var publications = repository.findToSynchronize();
-        AtomicInteger quantityErrors = new AtomicInteger();
+    @Transactional
+    @TransactionConfiguration(timeout = 36000)
+    public boolean synchronization() {
+        if (isProcessing) return true;
         try {
-            logger.info("# Publications to publish: " + publications.size());
-            publications.stream()
-                    .forEach(p -> {
-                        try {
-                            sendProductToWoocommerce(p);
-                        } catch (Exception ex) {
-                            quantityErrors.getAndIncrement();
-                            logger.error("Error on publishing product: " + p.getId() + " - Error: " + ex.getMessage(), ex);
-                        }
-                    });
-        } catch (Exception ex) {
-            logger.error("Total Errors: " + quantityErrors.get());
-            logger.error(ex.getMessage(), ex);
-            throw ex;
+            isProcessing = true;
+            synchronizeParameters();
+
+            AtomicInteger migrated = new AtomicInteger(0);
+            Multi.createFrom().emitter(e -> emitMulti(e))
+                    .onFailure().recoverWithCompletion()
+                    .subscribe().with((p) -> {
+                                logger.info(p.toString());
+                                try {
+                                    sendProductToWoocommerce((Publication) p);
+                                    migrated.incrementAndGet();
+                                } catch (Exception e) {
+                                    e.printStackTrace();
+                                }
+                            }, ex -> logger.error(ex.getMessage(), ex),
+                            () -> logger.info("Completed: " + migrated.get()));
         } finally {
-            transaction.commit();
+            isProcessing = false;
         }
+        return false;
     }
 
     @Override
@@ -183,6 +190,7 @@ public class WooCommerceService implements IWooCommerceService {
                     throw ex;
                 }
             } else {
+                logger.error("Does not found a Product: " + order.getProductId());
                 throw new NotFoundException("No se pudo encontrar el producto ingresado, por favor comuniquese con el administrador.");
             }
         } catch (Exception ex) {
@@ -224,7 +232,7 @@ public class WooCommerceService implements IWooCommerceService {
                 throw new NotFoundException("No se pudo encontrar el registro de venta activo, por favor comuniquese con el Administrador.");
             }
         } catch (Exception ex) {
-            logger.error("Error on selling a publication  . " + ex.getMessage(), ex);
+            logger.error("Error on downloading a publication  . " + ex.getMessage(), ex);
             transaction.rollback();
             throw ex;
         } finally {
@@ -235,12 +243,39 @@ public class WooCommerceService implements IWooCommerceService {
         }
     }
 
+    @Transactional
+    public void synchronizeParameters() {
+        try {
+            synchronizeTags();
+            var publications = repository.findToSynchronize();
+            var bicCodes = publications.stream()
+                    .filter(p -> Objects.nonNull(p.getSubjectBicCode()))
+                    .map(p -> asList(StringUtils.split(p.getSubjectBicCode(), "|")))
+                    .flatMap(Collection::stream).distinct()
+                    .collect(Collectors.toList());
+            synchronizeCategories(bicCodes);
+        } catch (Exception ex) {
+            logger.error(ex.getMessage(), ex);
+            throw ex;
+        }
+    }
+
+    private void emitMulti(MultiEmitter<? super Publication> emitter) {
+        var publications = repository.findToSynchronize(0, 10000);
+        logger.info("Publications: " + publications.size());
+        for (var publication : publications) {
+            emitter.emit(publication);
+        }
+        emitter.complete();
+    }
+
     private void sendProductToWoocommerce(Publication publication) throws Exception {
         var price = publication.getPrice();
         if (Objects.nonNull(price) && !price.isMigrated()) {
             var updated = (Objects.isNull(price.getRole()) || price.getRole().equals(Byte.valueOf("14")));
             Double priceValue = calculatePrice(price);
-
+            Thread.sleep(3000);
+            if (!publication.getId().isEmpty()) return;
             if (Objects.nonNull(publication.getProductId()) && publication.getProductId() > 0) {
                 var productUpdate = UpdateProductRequest.builder()
                         .description(publication.getTextContent())
@@ -248,11 +283,9 @@ public class WooCommerceService implements IWooCommerceService {
                         .name(publication.getTitle())
                         .regular_price(String.valueOf(priceValue))
                         .categories(getCategories(publication.getSubjectBicCode()))
-                        .tags(asList(new ItemDto(publication.getPublisher().getTagId(), null)))
+                        .tags(List.of(new ItemDto(publication.getPublisher().getTagId(), null)))
                         .build();
                 wooCommerceAPI.putProduct(publication.getProductId(), productUpdate);
-                publication.setUpdated(true);
-                repository.persist(publication);
             } else {
                 var product = CreateProductRequest.builder()
                         .description(publication.getTextContent())
@@ -261,28 +294,27 @@ public class WooCommerceService implements IWooCommerceService {
                         .sku(publication.getIsbn())
                         .regular_price(String.valueOf(priceValue))
                         .type("simple")
-                        .images(asList(new ImageDto(null, publication.getMedia().getPath())))
+                        .images(List.of(new ImageDto(null, publication.getMedia().getPath())))
                         .categories(getCategories(publication.getSubjectBicCode()))
-                        .tags(asList(new ItemDto(publication.getPublisher().getTagId(), null)))
+                        .tags(List.of(new ItemDto(publication.getPublisher().getTagId(), null)))
                         .virtual(true)
                         .build();
-
                 ProductDto response = wooCommerceAPI.postProduct(product);
-                if (!price.getCurrencyCode().equals("BOB")) {
-                    publication.setExchangeRate(exchangeRate);
-                }
-                price.setMigrated(true);
-                publication.setUpdated(updated);
                 publication.setProductId(response.getId());
-                repository.persist(publication);
             }
+            if (!price.getCurrencyCode().equals("BOB")) {
+                publication.setExchangeRate(exchangeRate);
+            }
+            price.setMigrated(true);
+            publication.setUpdated(updated);
+            repository.persistAndFlush(publication);
         } else {
             logger.warn("The publication " + publication.getId() + " was not synchronized. " + publication);
         }
     }
 
     private Double calculatePrice(Price price) {
-        Double priceValue = 0D;
+        Double priceValue;
         if (price.getCurrencyCode().equals("BOB")) {
             priceValue = price.getPriceAmount();
         } else {
@@ -291,30 +323,8 @@ public class WooCommerceService implements IWooCommerceService {
         return priceValue;
     }
 
-    private boolean synchronizeParameters() throws SystemException, NotSupportedException,
-            HeuristicRollbackException, HeuristicMixedException, RollbackException {
-        transaction.begin();
-        try {
-            synchronizeTags();
-            var publications = repository.findToSynchronize();
-            var bicCodes = publications.stream()
-                    .filter(p -> Objects.nonNull(p.getSubjectBicCode()))
-                    .map(p -> asList(StringUtils.split(p.getSubjectBicCode(), "|")))
-                    .flatMap(Collection::stream)
-                    .distinct()
-                    .collect(Collectors.toList());
-            synchronizeCategories(bicCodes);
-        } catch (Exception ex) {
-            logger.error(ex.getMessage(), ex);
-            throw ex;
-        } finally {
-            transaction.commit();
-        }
-        return true;
-    }
-
     private List<ItemDto> getCategories(String subjectsBIC) {
-        if (Objects.isNull(subjectsBIC) && subjectsBIC.length() > 0) {
+        if (Objects.isNull(subjectsBIC)) {
             return new ArrayList<>();
         }
         return Arrays.stream(StringUtils.split(subjectsBIC, "|"))
@@ -327,7 +337,7 @@ public class WooCommerceService implements IWooCommerceService {
         var publishers = publisherRepository.findToSynchronize();
         logger.info("# Publishers to publish: " + publishers.size());
         try {
-            publishers.stream()
+            publishers
                     .forEach(p -> {
                         var tag = ItemDto.builder()
                                 .name(p.getName())
@@ -347,7 +357,7 @@ public class WooCommerceService implements IWooCommerceService {
         var subjects = Category.findToSynchronize(bicCodes);
         logger.info("# Categories: " + subjects.size());
         try {
-            subjects.stream()
+            subjects
                     .forEach(p -> {
                         var category = ItemDto.builder()
                                 .name(p.getDescription())

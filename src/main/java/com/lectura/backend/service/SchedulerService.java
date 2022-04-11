@@ -1,6 +1,5 @@
 package com.lectura.backend.service;
 
-import com.lectura.backend.service.impl.WooCommerceService;
 import io.quarkus.scheduler.Scheduled;
 import org.jboss.logging.Logger;
 
@@ -22,7 +21,8 @@ public class SchedulerService {
     public void process() throws Exception {
         var dateTime = LocalDateTime.now();
         logger.info("Running Synchronization... " + dateTime);
-        // cantookService.deltaSynchronization(dateTime);
-        // wooCommerceService.synchronization(dateTime);
+        logger.info("Delta Datetime... " + dateTime.minusDays(1));
+        //cantookService.deltaSynchronization(dateTime.minusDays(1));
+        //wooCommerceService.synchronization();
     }
 }
