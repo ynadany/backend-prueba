@@ -15,6 +15,7 @@ import com.lectura.backend.util.XmlUtils;
 import io.quarkus.narayana.jta.runtime.TransactionConfiguration;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.subscription.MultiEmitter;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.rest.client.inject.RestClient;
 import org.jboss.logging.Logger;
 import org.w3c.dom.Node;
@@ -70,6 +71,9 @@ public class CantookService implements ICantookService {
     private static PublicationHandler publicationHandler = new PublicationHandler();
     private static PriceHandler priceHandler = new PriceHandler();
     private static SAXParser saxParser;
+
+    @ConfigProperty(name = "libranda.pages-migrated", defaultValue = "-1")
+    Integer pagesMigrated;
 
     @Inject
     @RestClient
@@ -208,6 +212,10 @@ public class CantookService implements ICantookService {
                         migration.persistAndFlush();
                         logger.info("Next Link >> Query String: " + link.getUri().getRawQuery());
                         startValue = getQueryParam(link.getUri().getRawQuery(), "start");
+                        if (pagesMigrated > 0 && countPages >= pagesMigrated) {
+                            logger.info("Truncate full migration on: " + countPages);
+                            isProcessing = false;
+                        }
                     }
                 } catch (WebApplicationException ex) {
                     if (ex.getResponse().getStatus() == 404) {
