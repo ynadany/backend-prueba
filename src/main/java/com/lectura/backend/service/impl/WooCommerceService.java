@@ -26,6 +26,7 @@ import javax.transaction.*;
 import javax.ws.rs.BadRequestException;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -38,6 +39,7 @@ import static java.util.Arrays.asList;
 @ApplicationScoped
 public class WooCommerceService implements IWooCommerceService {
     private static final Logger logger = Logger.getLogger(WooCommerceService.class);
+    private static final int SIZE_PAGE_TO_PROCESS = 1000;
 
     private static boolean isProcessing = false;
 
@@ -68,27 +70,17 @@ public class WooCommerceService implements IWooCommerceService {
     ICantookService cantookService;
 
     @Override
-    @Transactional
-    @TransactionConfiguration(timeout = 36000)
     public boolean synchronization() {
         if (isProcessing) return true;
         try {
             isProcessing = true;
             synchronizeParameters();
-
-            AtomicInteger migrated = new AtomicInteger(0);
-            Multi.createFrom().emitter(e -> emitMulti(e))
-                    .onFailure().recoverWithCompletion()
-                    .subscribe().with((p) -> {
-                                logger.info(p.toString());
-                                try {
-                                    sendProductToWoocommerce((Publication) p);
-                                    migrated.incrementAndGet();
-                                } catch (Exception e) {
-                                    e.printStackTrace();
-                                }
-                            }, ex -> logger.error(ex.getMessage(), ex),
-                            () -> logger.info("Completed: " + migrated.get()));
+            int i = 0;
+            boolean check = true;
+            while (check) {
+                logger.info("Process Synchro to Woocommerce > Chunk: " + i++);
+                check = processSynchro();;
+            }
         } finally {
             isProcessing = false;
         }
@@ -104,6 +96,9 @@ public class WooCommerceService implements IWooCommerceService {
 
             if (Objects.nonNull(publication) && !publication.getId().isEmpty()) {
                 Price publicationPrice = publication.getPrice();
+                if (!calculatePrice(publicationPrice).equals(price)) {
+                    throw new WebApplicationException("The prices are different!!!", Response.Status.BAD_REQUEST);
+                }
                 try {
                     var validSale = cantookServiceAPI.simulateSale(publication.getIsbn(),
                             Descriptions.getFormats(publication.getProductFormDetail()).get(0),
@@ -244,6 +239,7 @@ public class WooCommerceService implements IWooCommerceService {
     }
 
     @Transactional
+    @TransactionConfiguration(timeout = 2000)
     public void synchronizeParameters() {
         try {
             synchronizeTags();
@@ -260,22 +256,46 @@ public class WooCommerceService implements IWooCommerceService {
         }
     }
 
+    @Transactional
+    @TransactionConfiguration(timeout = 2000)
+    public boolean processSynchro() {
+        isProcessing = true;
+        AtomicInteger migrated = new AtomicInteger(0);
+        Multi.createFrom().emitter(e -> emitMulti(e))
+                .onFailure().recoverWithCompletion()
+                .subscribe().with((p) -> {
+                            logger.info(p.toString());
+                            try {
+                                sendProductToWoocommerce((Publication) p);
+                                migrated.incrementAndGet();
+                            } catch (Exception e) {
+                                logger.error(e.getMessage(), e);
+                            }
+                        }, ex -> logger.error(ex.getMessage(), ex),
+                        () -> logger.info("Completed: " + migrated.get()));
+        return isProcessing;
+    }
+
     private void emitMulti(MultiEmitter<? super Publication> emitter) {
-        var publications = repository.findToSynchronize(0, 10000);
+        var publications = repository.findToSynchronize(0, SIZE_PAGE_TO_PROCESS);
         logger.info("Publications: " + publications.size());
         for (var publication : publications) {
             emitter.emit(publication);
+        }
+        if (publications.size() < SIZE_PAGE_TO_PROCESS) {
+            isProcessing = false;
         }
         emitter.complete();
     }
 
     private void sendProductToWoocommerce(Publication publication) throws Exception {
+        logger.info("Synchro publication: " + publication.getId());
         var price = publication.getPrice();
         if (Objects.nonNull(price) && !price.isMigrated()) {
             var updated = (Objects.isNull(price.getRole()) || price.getRole().equals(Byte.valueOf("14")));
             Double priceValue = calculatePrice(price);
-            Thread.sleep(3000);
-            if (!publication.getId().isEmpty()) return;
+            //Thread.sleep(3000);
+            //if (!publication.getId().isEmpty()) return;
             if (Objects.nonNull(publication.getProductId()) && publication.getProductId() > 0) {
                 var productUpdate = UpdateProductRequest.builder()
                         .description(publication.getTextContent())
@@ -364,7 +384,7 @@ public class WooCommerceService implements IWooCommerceService {
                                 .build();
                         var result = wooCommerceAPI.postCategories(category);
                         p.setCategoryId(result.getId());
-                        p.persist();
+                        p.persistAndFlush();
                     });
         } catch (Exception ex) {
             logger.error("Error on synchronization of Categories.", ex);
